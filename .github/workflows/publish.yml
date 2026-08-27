@@ -36,7 +36,8 @@ jobs:
           $sshDir = Join-Path $env:RUNNER_TEMP 'durkspace-source-ssh'
           New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
           $keyPath = Join-Path $sshDir 'id_ed25519'
-          Set-Content -LiteralPath $keyPath -Value $env:DURKSPACE_SOURCE_DEPLOY_KEY -NoNewline
+          $keyText = $env:DURKSPACE_SOURCE_DEPLOY_KEY.Replace("`r", '')
+          [IO.File]::WriteAllText($keyPath, "$keyText`n", [Text.UTF8Encoding]::new($false))
           icacls $keyPath /inheritance:r /grant:r "$env:USERNAME`:R" | Out-Null
           "GIT_SSH_COMMAND=ssh -i `"$keyPath`" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" |
             Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -45,6 +46,7 @@ jobs:
         shell: pwsh
         run: |
           git clone --filter=blob:none git@github.com:durkenterprises/durkspace.git source
+          if ($LASTEXITCODE -ne 0) { throw 'Could not clone the private source repository.' }
           Push-Location source
           try {
             $tag = @(git tag --list 'v*' --sort=-version:refname)[0]
