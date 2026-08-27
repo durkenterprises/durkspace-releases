@@ -45,8 +45,9 @@ jobs:
       - name: Select newest private source tag
         shell: pwsh
         run: |
-          git clone --filter=blob:none git@github.com:durkenterprises/durkspace.git source
+          git clone --filter=blob:none --no-checkout git@github.com:durkenterprises/durkspace.git source
           if ($LASTEXITCODE -ne 0) { throw 'Could not clone the private source repository.' }
+          git -C source config core.autocrlf false
           Push-Location source
           try {
             $tag = @(git tag --list 'v*' --sort=-version:refname)[0]
