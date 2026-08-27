@@ -78,10 +78,13 @@ jobs:
         working-directory: source
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           npm ci --no-audit
           npm run check:supply-chain
           npm run typecheck
           npm test
+          npm run build:renderer
           cargo fmt --all -- --check
           cargo test --workspace --all-targets --locked
           cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
