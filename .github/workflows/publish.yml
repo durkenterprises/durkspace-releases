@@ -104,15 +104,14 @@ jobs:
         run: |
           $nsis = Join-Path $PWD 'target/release/bundle/nsis'
           $installer = @(Get-ChildItem -LiteralPath $nsis -Filter '*setup.exe' -File)
-          $archive = @(Get-ChildItem -LiteralPath $nsis -Filter '*.zip' -File)
-          if ($installer.Count -ne 1 -or $archive.Count -ne 1) {
-            throw 'Expected one installer and one updater archive.'
+          if ($installer.Count -ne 1) {
+            throw 'Expected one updater installer.'
           }
-          $signature = "$($archive[0].FullName).sig"
+          $signature = "$($installer[0].FullName).sig"
           $manifest = Join-Path $nsis 'latest.json'
           if (-not (Test-Path -LiteralPath $signature -PathType Leaf) -or
               -not (Test-Path -LiteralPath $manifest -PathType Leaf)) {
             throw 'Updater signature or latest.json is missing.'
           }
           gh release create $env:DURK_TAG --repo $env:GITHUB_REPOSITORY --title "DurkSpace $env:DURK_TAG" --generate-notes
-          gh release upload $env:DURK_TAG $installer[0].FullName $archive[0].FullName $signature $manifest --repo $env:GITHUB_REPOSITORY
+          gh release upload $env:DURK_TAG $installer[0].FullName $signature $manifest --repo $env:GITHUB_REPOSITORY
