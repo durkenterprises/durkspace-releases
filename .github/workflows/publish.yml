@@ -15,7 +15,7 @@ concurrency:
 jobs:
   publish:
     runs-on: windows-2025
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       CARGO_TERM_COLOR: always
       DURK_UPDATER_ENDPOINT: https://github.com/durkenterprises/durkspace-releases/releases/latest/download/latest.json
@@ -78,6 +78,11 @@ jobs:
           npm run check:supply-chain
           npm run typecheck
           npm test
+          cargo fmt --all -- --check
+          cargo test --workspace --all-targets --locked
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+          npm run build:driver
+          npm run test:e2e
           npm run build:updater
           $env:GITHUB_REF_NAME = $env:DURK_TAG
           npm run release:update-metadata
