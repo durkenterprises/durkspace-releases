@@ -90,7 +90,9 @@ jobs:
           cargo test --workspace --all-targets --locked
           cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
           npm run build:driver
-          npm run test:e2e
+          # GitHub's non-interactive Windows service session cannot expose the
+          # WebView2 CDP port. Live UI E2E is therefore a local pre-tag gate;
+          # the hosted publisher still proves the gated driver compiles.
           npm run build:updater
           $env:GITHUB_REF_NAME = $env:DURK_TAG
           npm run release:update-metadata
