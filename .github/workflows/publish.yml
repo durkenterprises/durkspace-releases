@@ -1,0 +1,103 @@
+name: Publish signed DurkSpace update
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: durkspace-update-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+      DURK_UPDATER_ENDPOINT: https://github.com/durkenterprises/durkspace-releases/releases/latest/download/latest.json
+      GITHUB_REPOSITORY: durkenterprises/durkspace-releases
+      GH_TOKEN: ${{ github.token }}
+      TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - name: Install read-only private-source key
+        shell: pwsh
+        env:
+          DURKSPACE_SOURCE_DEPLOY_KEY: ${{ secrets.DURKSPACE_SOURCE_DEPLOY_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:DURKSPACE_SOURCE_DEPLOY_KEY)) {
+            throw 'DURKSPACE_SOURCE_DEPLOY_KEY is missing.'
+          }
+          $sshDir = Join-Path $env:RUNNER_TEMP 'durkspace-source-ssh'
+          New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+          $keyPath = Join-Path $sshDir 'id_ed25519'
+          Set-Content -LiteralPath $keyPath -Value $env:DURKSPACE_SOURCE_DEPLOY_KEY -NoNewline
+          icacls $keyPath /inheritance:r /grant:r "$env:USERNAME`:R" | Out-Null
+          "GIT_SSH_COMMAND=ssh -i `"$keyPath`" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Select newest private source tag
+        shell: pwsh
+        run: |
+          git clone --filter=blob:none git@github.com:durkenterprises/durkspace.git source
+          Push-Location source
+          try {
+            $tag = @(git tag --list 'v*' --sort=-version:refname)[0]
+            if ([string]::IsNullOrWhiteSpace($tag)) { throw 'Private source has no v* release tag.' }
+            git checkout --detach $tag
+            $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+            if ($tag -cne "v$version") { throw "Newest tag $tag does not match package version v$version." }
+            "DURK_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "DURK_BUILD_SOURCE=$(git rev-parse HEAD)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+          finally { Pop-Location }
+          gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            "DURK_SKIP_RELEASE=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+
+      - name: Use pinned Node and npm cache
+        if: env.DURK_SKIP_RELEASE != 'true'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: source/.nvmrc
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Build signed updater artifacts
+        if: env.DURK_SKIP_RELEASE != 'true'
+        working-directory: source
+        shell: pwsh
+        run: |
+          npm ci --no-audit
+          npm run check:supply-chain
+          npm run typecheck
+          npm test
+          npm run build:updater
+          $env:GITHUB_REF_NAME = $env:DURK_TAG
+          npm run release:update-metadata
+
+      - name: Publish release-only assets
+        if: env.DURK_SKIP_RELEASE != 'true'
+        working-directory: source
+        shell: pwsh
+        run: |
+          $nsis = Join-Path $PWD 'target/release/bundle/nsis'
+          $installer = @(Get-ChildItem -LiteralPath $nsis -Filter '*setup.exe' -File)
+          $archive = @(Get-ChildItem -LiteralPath $nsis -Filter '*.zip' -File)
+          if ($installer.Count -ne 1 -or $archive.Count -ne 1) {
+            throw 'Expected one installer and one updater archive.'
+          }
+          $signature = "$($archive[0].FullName).sig"
+          $manifest = Join-Path $nsis 'latest.json'
+          if (-not (Test-Path -LiteralPath $signature -PathType Leaf) -or
+              -not (Test-Path -LiteralPath $manifest -PathType Leaf)) {
+            throw 'Updater signature or latest.json is missing.'
+          }
+          gh release create $env:DURK_TAG --repo $env:GITHUB_REPOSITORY --title "DurkSpace $env:DURK_TAG" --generate-notes
+          gh release upload $env:DURK_TAG $installer[0].FullName $archive[0].FullName $signature $manifest --repo $env:GITHUB_REPOSITORY
