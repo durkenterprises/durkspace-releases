@@ -61,6 +61,8 @@ jobs:
           gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -eq 0) {
             "DURK_SKIP_RELEASE=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          } else {
+            $global:LASTEXITCODE = 0
           }
 
       - name: Use pinned Node and npm cache
